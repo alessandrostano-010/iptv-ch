@@ -1,0 +1,142 @@
+import requests
+from concurrent.futures import ThreadPoolExecutor
+import xml.etree.ElementTree as ET
+
+# Liste di URL di playlist M3U principali
+URLS = [
+    "https://iptv-org.github.io/iptv/countries/ch.m3u",
+    "https://iptv-ch.github.io/tvopenchfr.m3u",
+    "https://iptv-ch.github.io/tvopenchen.m3u",
+    "https://iptv-ch.github.io/tvopenchde.m3u",
+    "https://iptv-ch.github.io/tvopenchit.m3u",
+    "https://iptv-ch.github.io/citycable.m3u",
+    "https://iptv-ch.github.io/netplus.m3u",
+    "https://iptv-ch.github.io/swisscom-sd.m3u",
+    "https://iptv-ch.github.io/swisscom-hd.m3u",
+    "https://iptv-ch.github.io/swisscom-uhd.m3u",
+    "https://iptv-ch.github.io/SwisscomIPTVfreeCA.m3u",
+    "https://iptv-ch.github.io/sunrise-tv.m3u",
+    "https://iptv-ch.github.io/sunrise-radio.m3u",
+    "https://github.com/iptv-org/iptv/raw/refs/heads/master/streams/ch_samsung.m3u",
+    "https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/ch.m3u",
+    "https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/ch_pluto.m3u"
+]
+
+# MPD links to be added and converted to M3U
+MPD_URLS = [
+    "https://cachehsi1a.netplus.ch/live/eds/rsila1hd/browser-dash/rsila1hd.mpd",
+    "https://cachehsi1a.netplus.ch/live/eds/rsila2hd/browser-dash/rsila2hd.mpd"
+]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+def download_playlists():
+    all_lines = []
+    for url in URLS:
+        try:
+            print(f"📥 Scaricando: {url}")
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            r.raise_for_status()
+            lines = r.text.strip().splitlines()
+            all_lines.extend(lines)
+        except Exception as e:
+            print(f"❌ Errore con {url}: {e}")
+    return all_lines
+
+def parse_entries(lines):
+    entries = []
+    temp = []
+    for line in lines:
+        if line.startswith("#EXTM3U"):
+            continue
+        if line.startswith("#EXTINF"):
+            temp = [line]
+        elif line.startswith("http"):
+            if temp:
+                temp.append(line)
+                entries.append(tuple(temp))
+                temp = []
+    return entries
+
+def test_url(url):
+    try:
+        r = requests.head(url, headers=HEADERS, timeout=5, allow_redirects=True)
+        return r.status_code == 200
+    except:
+        return False
+
+def filter_working_entries(entries):
+    working = []
+
+    def check(entry):
+        name, url = entry
+        if test_url(url):
+            print(f"✅ OK: {url}")
+            return entry
+        else:
+            print(f"⛔️ NON FUNZIONA: {url}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        results = executor.map(check, entries)
+
+    for res in results:
+        if res:
+            working.append(res)
+    return working
+
+def save_playlist(entries, output_file="docs/playlist.m3u"):
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write("#EXTM3U\n")
+        for extinf, url in entries:
+            f.write(extinf + "\n")
+            f.write(url + "\n")
+    print(f"\n💾 Playlist salvata in {output_file}")
+
+def convert_mpd_to_m3u(mpd_urls):
+    m3u_entries = []
+    
+    for mpd_url in mpd_urls:
+        try:
+            print(f"📥 Scaricando MPD: {mpd_url}")
+            r = requests.get(mpd_url, headers=HEADERS, timeout=10)
+            r.raise_for_status()
+            
+            # Parse MPD XML
+            root = ET.fromstring(r.content)
+            namespaces = {'': 'urn:mpeg:dash:schema:mpd:2011'}
+            
+            # Find all media URLs in MPD (from <BaseURL> tags)
+            base_urls = root.findall('.//{urn:mpeg:dash:schema:mpd:2011}BaseURL', namespaces)
+            for base_url in base_urls:
+                media_url = base_url.text
+                if media_url:
+                    m3u_entries.append(("#EXTINF:-1," + mpd_url, media_url))
+        except Exception as e:
+            print(f"❌ Errore con MPD {mpd_url}: {e}")
+    
+    return m3u_entries
+
+def extract_and_filter_all_entries():
+    # Step 1: Scarica e analizza tutte le playlist M3U
+    all_lines = download_playlists()
+    parsed = parse_entries(all_lines)
+    print(f"🎯 Totale canali trovati (compreso MPD): {len(parsed)}")
+
+    # Step 2: Converti gli MPD in M3U
+    mpd_entries = convert_mpd_to_m3u(MPD_URLS)
+    
+    # Step 3: Unisci le playlist
+    all_entries = parsed + mpd_entries
+    
+    # Step 4: Filtra i link validi
+    working = filter_working_entries(all_entries)
+    print(f"✅ Totale canali validi: {len(working)}")
+    
+    # Step 5: Salva il risultato
+    save_playlist(working)
+
+if __name__ == "__main__":
+    extract_and_filter_all_entries()
