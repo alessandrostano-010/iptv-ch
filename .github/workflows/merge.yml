@@ -1,0 +1,27 @@
+name: Update IPTV Playlist
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Esegui ogni 5 minuti per aggiornamenti frequenti
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install requests
+        run: pip install requests
+      - name: Run script
+        run: python merge_and_filter.py
+      - name: Commit e push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/playlist.m3u
+          git commit -m "Aggiornamento automatico playlist" || echo "Nessuna modifica"
+          git push
