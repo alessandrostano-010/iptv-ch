@@ -25,6 +25,3 @@ jobs:
           git add docs/playlist.m3u
           git commit -m "Aggiornamento automatico playlist" || echo "Nessuna modifica"
           git push
-
-
-
